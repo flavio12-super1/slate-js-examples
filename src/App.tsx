@@ -35,29 +35,34 @@ import {
 } from "slate-react";
 
 import { MentionElement } from "./custom-types";
+import { EmojiElement } from "./custom-types-emoji";
 import CHARACTERS from "./characters";
+import EMOJIS from "./emojis";
 
 import "./App.css";
 
 const App = () => {
   const ref = useRef<HTMLDivElement | null>(null);
-  // const [editor] = useState(() => withReact(createEditor()));
   const editor = useMemo(
-    () => withMentions(withReact(withHistory(createEditor()))),
+    () => withMentions(withEmojis(withReact(withHistory(createEditor())))),
     []
   );
   const [target, setTarget] = useState<Range | null>();
   const [index, setIndex] = useState(0);
   const [search, setSearch] = useState("");
+  const [emojiSearch, setEmojiSearch] = useState("");
   const renderLeaf = useCallback((props: any) => <Leaf {...props} />, []);
 
   // Define a rendering function based on the element passed to `props`. We use
   // `useCallback` here to memoize the function for subsequent renders.
   const renderElement = useCallback((props: any) => {
     const { attributes, children, element } = props;
+
     switch (element.type) {
       case "mention":
         return <Mention {...props} />;
+      case "emoji":
+        return <Emoji {...props} />;
       case "code":
         return <CodeElement {...props} />;
       default:
@@ -65,14 +70,56 @@ const App = () => {
     }
   }, []);
 
+  useEffect(() => {
+    console.log("searching mention: " + search);
+  }, [search]);
+  useEffect(() => {
+    console.log("searching emoji: " + emojiSearch);
+  }, [emojiSearch]);
+
   const chars = CHARACTERS.filter((c) =>
     c.toLowerCase().startsWith(search.toLowerCase())
+  ).slice(0, 10);
+
+  const emoji = EMOJIS.filter((c) =>
+    c.text.toLowerCase().startsWith(emojiSearch.toLowerCase())
   ).slice(0, 10);
 
   //this code allows you to select a mention from the popup
   const onKeyDown = useCallback(
     (event: any) => {
-      if (target && chars.length > 0) {
+      if (target && emojiSearch.length > 0) {
+        console.log("searching mention");
+        switch (event.key) {
+          case "ArrowDown":
+            event.preventDefault();
+            const prevIndex = index >= emoji.length - 1 ? 0 : index + 1;
+            setIndex(prevIndex);
+            break;
+          case "ArrowUp":
+            event.preventDefault();
+            const nextIndex = index <= 0 ? emoji.length - 1 : index - 1;
+            setIndex(nextIndex);
+            break;
+          case "Tab":
+          case "Enter":
+            event.preventDefault();
+            Transforms.select(editor, target);
+            if (emoji[index]) {
+              console.log("inserting emoji");
+              insertEmoji(editor, emoji[index].emoji);
+            }
+            setEmojiSearch("");
+            setTarget(null);
+            break;
+          case "Escape":
+            event.preventDefault();
+            setTarget(null);
+            setEmojiSearch("");
+
+            break;
+        }
+      } else if (target && search.length > 0) {
         console.log("searching mention");
         // console.log(chars);
         switch (event.key) {
@@ -90,12 +137,17 @@ const App = () => {
           case "Enter":
             event.preventDefault();
             Transforms.select(editor, target);
-            insertMention(editor, chars[index]);
+            if (chars[index]) {
+              console.log("inserting emoji");
+              insertMention(editor, chars[index]);
+            }
+            setSearch("");
             setTarget(null);
             break;
           case "Escape":
             event.preventDefault();
             setTarget(null);
+            setSearch("");
             break;
         }
       } else if (event.key === "`") {
@@ -112,9 +164,11 @@ const App = () => {
             match: (n) => Element.isElement(n) && Editor.isBlock(editor, n),
           }
         );
+        setEmojiSearch("");
+        setSearch("");
       }
     },
-    [chars, editor, index, target]
+    [chars, emoji, editor, index, target]
   );
 
   useEffect(() => {
@@ -122,7 +176,11 @@ const App = () => {
   }, [chars, target]);
 
   useEffect(() => {
-    if (target && chars.length > 0) {
+    console.log(emoji);
+  }, [emoji, target]);
+
+  useEffect(() => {
+    if (target && search.length > 0) {
       console.log("searching...");
       const el = ref.current;
       const domRange = ReactEditor.toDOMRange(editor, target);
@@ -132,7 +190,20 @@ const App = () => {
         el.style.left = `${rect.left + window.pageXOffset}px`;
       }
     }
-  }, [chars.length, editor, index, search, target]);
+  }, [search.length, editor, index, search, target]);
+
+  useEffect(() => {
+    if (target && emoji.length > 0) {
+      console.log("searching...");
+      const el = ref.current;
+      const domRange = ReactEditor.toDOMRange(editor, target);
+      const rect = domRange.getBoundingClientRect();
+      if (el) {
+        el.style.top = `${rect.top + window.pageYOffset + 24}px`;
+        el.style.left = `${rect.left + window.pageXOffset}px`;
+      }
+    }
+  }, [emojiSearch.length, editor, index, search, target]);
 
   return (
     <Slate
@@ -151,16 +222,24 @@ const App = () => {
 
           const beforeText = beforeRange && Editor.string(editor, beforeRange);
           const beforeMatch = beforeText && beforeText.match(/^@(\w+)$/);
+          const emojiMatch = beforeText && beforeText.match(/:(\w+)$/);
           const after = Editor.after(editor, start);
           const afterRange = Editor.range(editor, start, after);
           const afterText = Editor.string(editor, afterRange);
           const afterMatch = afterText.match(/^(\s|$)/);
 
           if (beforeMatch && afterMatch) {
-            console.log("setting target and search");
+            console.log("setting target and search for mention");
             setTarget(beforeRange);
-            //this sets the search depeting on what you typed in
+            setEmojiSearch("");
             setSearch(beforeMatch[1]);
+            setIndex(0);
+            return;
+          } else if (emojiMatch && afterMatch) {
+            console.log("setting target and search for emoji");
+            setTarget(beforeRange);
+            setSearch("");
+            setEmojiSearch(emojiMatch[1]);
             setIndex(0);
             return;
           }
@@ -176,7 +255,7 @@ const App = () => {
         placeholder="Enter some text..."
         onKeyDown={onKeyDown}
       />
-      {target && chars.length > 0 ? (
+      {target && search.length > 0 ? (
         <div
           ref={ref}
           style={{
@@ -197,6 +276,8 @@ const App = () => {
               onClick={() => {
                 Transforms.select(editor, target);
                 insertMention(editor, char);
+
+                setSearch("");
                 setTarget(null);
               }}
               style={{
@@ -207,6 +288,45 @@ const App = () => {
               }}
             >
               {char}
+            </div>
+          ))}
+        </div>
+      ) : target && emojiSearch.length > 0 ? (
+        <div
+          ref={ref}
+          style={{
+            top: "-9999px",
+            left: "-9999px",
+            position: "absolute",
+            zIndex: 1,
+            padding: "3px",
+            background: "white",
+            borderRadius: "4px",
+            boxShadow: "0 1px 5px rgba(0,0,0,.2)",
+          }}
+          data-cy="mentions-portal"
+        >
+          {emoji.map((emoji, i) => (
+            <div
+              key={emoji.emoji}
+              onClick={() => {
+                Transforms.select(editor, target);
+                if (emoji.emoji.length > 0) {
+                  console.log("inserting emoji");
+                  insertEmoji(editor, emoji.emoji);
+                }
+                setEmojiSearch("");
+
+                setTarget(null);
+              }}
+              style={{
+                padding: "1px 3px",
+                borderRadius: "3px",
+                background: i === index ? "#B4D5FF" : "transparent",
+                color: "black",
+              }}
+            >
+              {emoji.emoji}
             </div>
           ))}
         </div>
@@ -235,6 +355,24 @@ const withMentions = (editor: any) => {
   return editor;
 };
 
+const withEmojis = (editor: any) => {
+  const { isInline, isVoid, markableVoid } = editor;
+
+  editor.isInline = (element: any) => {
+    return element.type === "emoji" ? true : isInline(element);
+  };
+
+  editor.isVoid = (element: any) => {
+    return element.type === "emoji" ? true : isVoid(element);
+  };
+
+  editor.markableVoid = (element: any) => {
+    return element.type === "emoji" || markableVoid(element);
+  };
+
+  return editor;
+};
+
 const insertMention = (editor: any, character: string) => {
   const mention: MentionElement = {
     type: "mention",
@@ -242,6 +380,18 @@ const insertMention = (editor: any, character: string) => {
     children: [{ text: "" }],
   };
   Transforms.insertNodes(editor, mention as any);
+
+  Transforms.move(editor);
+};
+
+const insertEmoji = (editor: any, character: string) => {
+  const mention: EmojiElement = {
+    type: "emoji",
+    character,
+    children: [{ text: "" }],
+  };
+  Transforms.insertNodes(editor, mention as any);
+
   Transforms.move(editor);
 };
 
@@ -306,6 +456,18 @@ interface MentionProps extends RenderElementProps {
   element: CustomElement;
 }
 
+interface EmojiProps extends RenderElementProps {
+  attributes: {
+    "data-slate-node": "element";
+    "data-slate-inline"?: true;
+    "data-slate-void"?: true;
+    dir?: "rtl";
+    ref: any;
+  };
+  children: React.ReactNode;
+  element: CustomElement;
+}
+
 const Mention = ({ attributes, children, element }: MentionProps) => {
   const selected = useSelected();
   const focused = useFocused();
@@ -327,6 +489,7 @@ const Mention = ({ attributes, children, element }: MentionProps) => {
   if (element.children[0].italic) {
     style.fontStyle = "italic";
   }
+
   return (
     <span
       {...attributes}
@@ -335,6 +498,39 @@ const Mention = ({ attributes, children, element }: MentionProps) => {
       style={style}
     >
       @{element.character}
+      {children}
+    </span>
+  );
+};
+const Emoji = ({ attributes, children, element }: EmojiProps) => {
+  const selected = useSelected();
+  const focused = useFocused();
+  const style: React.CSSProperties = {
+    padding: "3px 3px 2px",
+    margin: "0 1px",
+    verticalAlign: "baseline",
+    display: "inline-block",
+    borderRadius: "4px",
+    color: "white",
+    fontSize: "0.9em",
+    boxShadow: selected && focused ? "0 0 0 2px #B4D5FF" : "none",
+  };
+  // See if our empty text child has any styling marks applied and apply those
+  if (element.children[0].bold) {
+    style.fontWeight = "bold";
+  }
+  if (element.children[0].italic) {
+    style.fontStyle = "italic";
+  }
+
+  return (
+    <span
+      {...attributes}
+      contentEditable={false}
+      data-cy={`mention-${element.character?.replace(" ", "-")}`}
+      style={style}
+    >
+      {element.character}
       {children}
     </span>
   );
