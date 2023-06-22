@@ -36,3 +36,11 @@
     transform: rotate(360deg);
   }
 }
+.codeBlock {
+  background-color: #282c34;
+  margin: 0px;
+  color: green;
+}
+.textNode {
+  margin: 0px;
+}
